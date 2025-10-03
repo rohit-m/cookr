@@ -6,7 +6,8 @@ import httpx
 import secrets
 import hashlib
 import base64
-from urllib.parse import urlencode
+import json
+from urllib.parse import urlencode, quote
 
 app = FastAPI()
 
@@ -112,7 +113,7 @@ async def tiktok_auth():
 
 @app.get("/auth/tiktok/callback")
 async def tiktok_callback(code: str, state: str):
-    """Handle TikTok OAuth callback with PKCE"""
+    """Handle TikTok OAuth callback with PKCE and redirect to search view"""
     # Verify state
     if state not in auth_states:
         raise HTTPException(status_code=400, detail="Invalid state parameter")
@@ -178,26 +179,26 @@ async def tiktok_callback(code: str, state: str):
             )
         
         user_data = user_response.json()
+        user_info = user_data.get("data", {}).get("user", {})
         
         # Store user in Supabase (optional)
         if supabase:
             try:
                 supabase.table("tiktok_users").upsert({
-                    "open_id": user_data.get("data", {}).get("user", {}).get("open_id"),
-                    "display_name": user_data.get("data", {}).get("user", {}).get("display_name"),
-                    "avatar_url": user_data.get("data", {}).get("user", {}).get("avatar_url"),
+                    "open_id": user_info.get("open_id"),
+                    "display_name": user_info.get("display_name"),
+                    "avatar_url": user_info.get("avatar_url"),
                     "access_token": access_token,  # In production, encrypt this!
                 }).execute()
             except Exception as e:
                 print(f"Error storing user: {e}")
         
-        # Return success with user data
-        return {
-            "success": True,
-            "user": user_data.get("data", {}).get("user"),
-            "access_token": access_token,
-            "message": "Successfully authenticated with TikTok"
-        }
+        # Redirect to the search view with access token and user data
+        frontend_url = os.getenv("FRONTEND_URL", "https://cookr.dev")
+        user_json = quote(json.dumps(user_info))
+        redirect_url = f"{frontend_url}/search?access_token={access_token}&user={user_json}"
+        
+        return RedirectResponse(url=redirect_url)
 
 # Supabase connection
 from supabase import create_client, Client
@@ -213,4 +214,33 @@ async def supabase_test():
     # Example query
     data = supabase.table("recipes").select("*").execute()
     return {"data": data}
+
+@app.get("/tiktok/search")
+async def tiktok_search(query: str):
+    """
+    Search TikTok videos endpoint
+    This is a placeholder - implement with TikTok Video Query API
+    Reference: https://developers.tiktok.com/doc/content-query-api-get-videos/
+    """
+    # TODO: Implement actual TikTok Video Query API integration
+    # For now, return a mock response
+    return {
+        "videos": [
+            {
+                "id": "example1",
+                "title": f"Example cooking video for: {query}",
+                "cover_image_url": "https://via.placeholder.com/300x400",
+                "view_count": 150000,
+                "like_count": 25000,
+            },
+            {
+                "id": "example2",
+                "title": f"How to cook {query} - Easy recipe",
+                "cover_image_url": "https://via.placeholder.com/300x400",
+                "view_count": 89000,
+                "like_count": 12000,
+            }
+        ],
+        "message": "This is a mock response. Implement TikTok Video Query API for real results."
+    }
 
